@@ -19,17 +19,6 @@
 #define NBLOCKS 10
 #define BLOCK_SIZE 36
 #define MAX_ARQ 2
-
-    
-
-// Variáveis globais
-    pthread_mutex_t cadeado;
-
-    int map_size = sizeof(bool) * NBLOCKS;
-    int inode_size = sizeof(inode) * NBLOCKS;
-    int block_size = BLOCK_SIZE * NBLOCKS;
-    int dir_atual;
-
     
 // Funções
     int create_socket();
@@ -51,7 +40,7 @@
     struct inode_{
         char name[5];   // Name arc/dir
         char type[3];   // Type arc/dir
-        int block;      // Bloco referente ao arc/dir
+        int block;      // Block referente ao arc/dir
         bool state;     // state
     };
     typedef struct inode_ inode;
@@ -61,15 +50,23 @@
         char name[5];
         int inode;
     };  
-    typedef struct dado_ dado;
+    typedef struct data_ data;
 
 
     struct dir_{
-        int now;
+        int current;
         int prev;
         data arq[MAX_ARQ];
     };
     typedef struct dir_ dir;
+
+    // Variáveis globais
+    pthread_mutex_t mutex;
+
+    int map_size = sizeof(bool) * NBLOCKS;
+    int inode_size = sizeof(inode) * NBLOCKS;
+    int block_size = BLOCK_SIZE * NBLOCKS;
+    int dir_current;
 
     FILE *file;
 
@@ -87,7 +84,7 @@ int fylesystem(){
 
     // Inicializa inode
     inode temp;
-    strcpy(temp name, "none");
+    strcpy(temp.name, "none");
     strcpy(temp.type, "nan");
     temp.block = -1;
     temp.state = false;
@@ -100,13 +97,13 @@ int fylesystem(){
     }
 
     
-    char *temp_ = malloc(BLOCK_SIZE); //seta o bloco com o tamanho pre definido
+    char *temp_ = malloc(BLOCK_SIZE); //seta o block com o tamanho pre definido
     
-    fseek(file, (map_size + inode_tam), SEEK_SET); //pula bitmap
+    fseek(file, (map_size + inode_size), SEEK_SET); //pula bitmap
 
     for(int i = 0; i < NBLOCKS; i++){
         
-        fwrite(temp_, BLOCK_SIZE, 1, file);   //escreve bloco vazio
+        fwrite(temp_, BLOCK_SIZE, 1, file);   //escreve block vazio
     }
 
     
@@ -116,57 +113,86 @@ int fylesystem(){
 }
 
 void root(){
-    
-    //cria diretorio raiz
     inode temp;
     bool state = 1;
 
-    // Pula para o primeiro inode
     fseek(file, map_size, SEEK_SET);
 
-    // Le o primeiro inode e insere na variavel temp
     fread(&temp, sizeof(inode), 1, file);
 
-    strcpy(temp name, "Raiz"); //esceve nome
-    strcpy(temp.type, "Dir");  //escreve diretorio
+    strcpy(temp.name, "Raiz"); 
+    strcpy(temp.type, "Dir");  
     temp.block = find_block(); 
     temp.state = 1;
 
-    fseek(file, map_size, SEEK_SET); //encontra primeiro inode livre
+    fseek(file, map_size, SEEK_SET); 
+
+    fwrite(&temp, sizeof(inode), 1, file); //escreve a var temporario na localização do primeiro inode do arquivo
+
+    dir temp_; 
+    temp_.current = 0;
+    temp_.prev = 0;
+    dir_current = 0;
 
     
-    fwrite(&temp, sizeof(inode), 1, file); //escreve a var temp na localização do primeiro inode do arquivo
-
-    dir temp_; //dir vazio
-    temp_.atual = 0;
-    temp_.ant = 0;
-    dir_atual = 0;
-
+    fseek(file, (map_size + inode_size + temp.block * BLOCK_SIZE), SEEK_SET);   
     
-    fseek(file, (map_size + inode_tam + temp.block * BLOCK_SIZE), SEEK_SET);   //encontra primeiro bloco livre
-    
-    fwrite(&temp_, sizeof(temp_), 1, file);   //screve o diretorio vazio na localizacao do bloco do arquivo
+    fwrite(&temp_, sizeof(temp_), 1, file);   //screve o diretorio vazio na localizacao do block do arquivo
 
     return;
 }
 
+int create_socket(){
+    struct sockaddr_in socketAddr;
+
+    
+    socketAddr.sin_family = AF_INET;                        
+    socketAddr.sin_port = htons(5000);                      
+    socketAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    bzero(&(socketAddr.sin_zero), 8);
+
+
+    int socket_read = socket(AF_INET, SOCK_STREAM, 0);
+    if(socket_read == -1){
+        printf ("Erro ao criar o socket.\n");
+        exit(-1);
+    }
+
+    int enable = 1;
+    setsockopt(socket_read, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+
+    int bind_read = bind(socket_read, (struct sockaddr *)&socketAddr, sizeof(socketAddr));
+    if(bind_read == -1){
+        printf("Erro encontrado na funcao bind.\n");
+        exit(-1);
+    }
+
+
+    int listen_read = listen(socket_read, 10);
+    if(listen_read == -1){
+        printf("Erro encontrado na funcao listen.\n");
+        exit(-1);
+    }
+
+    return socket_read;
+}
+
+
 int find_block(){
-    // Pula para o inicio do arquivo
+
     fseek(file, 0, SEEK_SET);
 
     bool state;
     int i;
 
-    // Procura no bit map o primeiro bloco livre
+    
     for(i = 0; i < NBLOCKS; i++){
-        // Le a variavel de state do bit map
         fread(&state, sizeof(bool), 1, file);
-        // Verifica se o bloco esta livre
         if(state == 0)
             break;
     }
 
-    // Se o bloco estiver livre, muda o state para ocupado
+    // Com o block livre, muda o state para ocupado
     state = 1;
     fseek(file, (i * sizeof(bool)), SEEK_SET);
     fwrite(&state, sizeof(bool), 1, file);   
@@ -175,46 +201,27 @@ int find_block(){
 
 }
 
-int create_socket(){
-    struct sockaddr_in socketAddr;
+int find_inode(){
 
-    //Configuracao do socket
-	socketAddr.sin_family = AF_INET;						// Familia do endereço
-	socketAddr.sin_port = htons(7000);						// Porta escolhida (htons converte o valor na ordem de bytes da rede)
-	socketAddr.sin_addr.s_addr = inet_addr("127.0.0.1");	// Endereço IP, localhost (inet_addr converte o endereço para binario em bytes)
-	bzero(&(socketAddr.sin_zero), 8);						// Prevencao de bug para arquiteturas diferentes
+    
+    inode temp;
+    int i;
 
+    // Busca o primeiro inode livre
+    for(i = 0; i < NBLOCKS; i++){
+        fseek(file, (map_size + i * sizeof(inode)), SEEK_SET);
+        fread(&temp, sizeof(inode), 1, file);
+        if(temp.state == 0)
+            break;
+    }
 
-	/* Inicializa o socket:
-    Dominio da comunicacao (AF_NET p/ TCP/IP),
-    type de comunicacao (TCP/UDP) (SOCK_STREAM p/ TCP)
-    Protocolo (0) */
-	int socketR = socket(AF_INET, SOCK_STREAM, 0);
-	if(socketR == -1){
-		printf ("Erro ao criar o socket.\n");
-		exit(-1);
-	}
+    // Com o inode livre, altera o state para ocupado
+    temp.state = 1;
+    fseek(file, (map_size + i * sizeof(inode)), SEEK_SET);
+    fwrite(&temp, sizeof(inode), 1, file);
 
-    int enable = 1;
-    setsockopt(socketR, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
-
-	//Associa o socket criado com a porta do SO
-	int bindR = bind(socketR, (struct sockaddr *)&socketAddr, sizeof(socketAddr));
-	if(bindR == -1){
-		printf("Erro na funcao bind.\n");
-		exit(-1);
-	}
-
-    //Habilita o socket pra receber as conexoes atraves do descritor (socketR) do socket
-	int listenR = listen(socketR, 10);
-	if(listenR == -1){
-		printf("Erro na funcao listen.\n");
-		exit(-1);
-	}
-
-	return socketR;
+    return i;
 }
-
 
 void* comando(void* connfd_){
     int* conexao = (int*)connfd_;
@@ -227,7 +234,6 @@ void* comando(void* connfd_){
 
     while (strcmp(recvBuffer, "exit") != 0){
 
-        //Retorna o tamanho da String que o cliente escreveu
         memset(recvBuffer, 0, sizeof(recvBuffer));
         int recvR = recv(*conexao, recvBuffer, 100, 0);
 
@@ -235,43 +241,38 @@ void* comando(void* connfd_){
         recvBuffer[recvR - 1] = '\0'; 
         int status;
 
-        //criar (sub)diretorio
         if (strncmp(recvBuffer, "mkdir ", 6) == 0){
-            pthread_mutex_lock(&cadeado);
+            pthread_mutex_lock(&mutex);
 
             status = mkdir_(recvBuffer);
 
             if(!status) printf("Pasta criada com sucesso\n");
             else printf ("Erro ao criar pasta\n");
         
-            pthread_mutex_unlock(&cadeado);
+            pthread_mutex_unlock(&mutex);
         }
 
-        //remover (sub)diretorio
+        
         if (strncmp(recvBuffer, "rm -r ", 6) == 0){
-            pthread_mutex_lock(&cadeado);
-
-            //status = rm_r(recvBuffer);
+            pthread_mutex_lock(&mutex);
             
             if(!status) printf("Pasta excluida com sucesso\n");
             else printf ("Erro ao excluir pasta\n");
 
-            }
-         //entrar em (sub)diretorio
-        
-     // Bit map, mapa de espaço livre
-            //-------------------------------------- // Bit map, mapa de espaço 
-    // Escreve state do arquivo
-            memmove(recvBuffer, recvBuffer + 3, strlen(recvBuffer)); // Escreve state do arquivo
+            pthread_mutex_unlock(&mutex);
 
-            chdir(rec
-            printf("Entra no diretorio %s\n", recvBu
-            pthread_mutex_unlock(&cadeado);
-            
-            //--------------------------------------
-        
+        }
+         
+        if (strncmp(recvBuffer, "cd ", 3) == 0){
 
-        //mostrar conteudo do diretorio
+            pthread_mutex_lock(&mutex);            
+            memmove(recvBuffer, recvBuffer + 3, strlen(recvBuffer)); 
+
+            chdir(recvBuffer);
+            printf("Entrando no diretorio %s\n", recvBuffer);
+            pthread_mutex_unlock(&mutex);
+        }
+
         if (strcmp(recvBuffer, "ls") == 0){
 
             char *buffer = ls();
@@ -280,111 +281,147 @@ void* comando(void* connfd_){
 
         }
 
-        //criar arquivo
         if (strncmp(recvBuffer, "touch ", 6) == 0){
-            pthread_mutex_lock(&cadeado);
+            pthread_mutex_lock(&mutex);
 
             status = touch(recvBuffer);
 
             if(!status) printf("Arquivo criado com sucesso\n");
             else printf ("Erro ao criar arquivo\n");
 
-            pthread_mutex_unlock(&cadeado);
+            pthread_mutex_unlock(&mutex);
         }
 
-        //remover arquivo
         if ((strncmp(recvBuffer, "rm ", 3) == 0) && (strncmp(recvBuffer, "rm -r ", 6) != 0) ){
-            pthread_mutex_lock(&cadeado);
-            
-            //status = rm(recvBuffer);
+            pthread_mutex_lock(&mutex);
 
             if(!status) printf("Arquivo removido com sucesso\n");
             else printf("Erro ao remover arquivo\n");
 
-            pthread_mutex_unlock(&cadeado);
+            pthread_mutex_unlock(&mutex);
         }
 
-        //escrever um sequencia de caracteres em um arquivo
         if (strncmp(recvBuffer, "echo ", 5) == 0){
-            pthread_mutex_lock(&cadeado);
-
-            //status = echo(recvBuffer);
+            pthread_mutex_lock(&mutex);
 
             if(!status) printf("Caracteres inseridos com sucesso\n");
             else printf("Erro ao inserir caracteres\n");
 
-            pthread_mutex_unlock(&cadeado);
+            pthread_mutex_unlock(&mutex);
         }
 
-        //mostrar conteudo do arquivo
         if (strncmp(recvBuffer, "cat ", 4) == 0){
-            pthread_mutex_lock(&cadeado);
+            pthread_mutex_lock(&mutex);
 
-            //sendBuffer = cat(recvBuffer);
             send(*conexao, sendBuffer, strlen(sendBuffer), 0);
             
-            pthread_mutex_unlock(&cadeado);
+            pthread_mutex_unlock(&mutex);
         }
 
     }
     printf("Conexao fechada\n");
 }
 
-
-int find_inode(){
-
-    // Cria inode temporario
+char* ls(){
+    
     inode temp;
-    int i;
+    int block;
+    dir current;
+    char *list = (char*) malloc(sizeof(char));
 
-    // Busca o primeiro inode livre
-    for(i = 0; i < NBLOCKS; i++){
-        // Vai pulando de inode em inode
-        fseek(file, (map_size + i * sizeof(inode)), SEEK_SET);
-        // Le o inode correspondente
-        fread(&temp, sizeof(inode), 1, file);
-        // Verifica o state do inode
-        if(temp.state == 0)
+    fseek(file, (map_size + dir_current * sizeof(inode)), SEEK_SET);
+    fread(&temp, sizeof(inode), 1, file);
+
+    block = temp.block;
+
+    fseek(file, (map_size + inode_size + block * BLOCK_SIZE), SEEK_SET);
+    fread(&current, BLOCK_SIZE, 1, file);
+        
+    strcat(list, "\t.\t..");
+
+    for(int i = 0; i < MAX_ARQ; i++){
+        if(current.arq[i].name != NULL){
+            strcat(list, "\t");
+            strcat(list, current.arq[i].name);
+        }
+        else break;
+    }
+
+    list[strlen(list) - 2] = '\n';
+    list[strlen(list) - 1] = '\0';
+
+    return list;
+
+}
+
+int touch(char* recvBuffer){
+
+    int block_livre, block_dir;
+    inode temp;
+    dir current;
+    char *name;
+
+    block_livre = find_block();
+
+    fseek(file, (map_size + dir_current * sizeof(inode)), SEEK_SET);
+    fread(&temp, sizeof(inode), 1, file);
+
+    block_dir = temp.block;
+
+    fseek(file, (map_size + inode_size + block_dir * BLOCK_SIZE), SEEK_SET);
+    fread(&current, BLOCK_SIZE, 1, file);
+
+    name = strtok(recvBuffer," ");
+    name = strtok(NULL, " ");
+
+    int i;
+    for(i = 0; i < MAX_ARQ; i++){
+        if(current.arq[i].inode != 0)
             break;
     }
 
-    // Se o inode estiver livre, altera o state para ocupado
-    temp.state = 1;
-    fseek(file, (map_size + i * sizeof(inode)), SEEK_SET);
-    fwrite(&temp, sizeof(inode), 1, file);
+    if(i != MAX_ARQ){
+        strcpy(current.arq[i].name, name);
+        current.arq[i].inode = block_livre;
+    }
+    else{
+        printf("Diretorio cheio\n");
+        exit(0);
+    }
 
-    return i;
+    fseek(file, (map_size + inode_size + block_dir * BLOCK_SIZE), SEEK_SET);
+    fwrite(&current, sizeof(dir), 1, file);
+
+    return 0;
+    
 }
-
 
 int mkdir_(char* recvBuffer){
 
     inode temp;
     int inode_pos, status;
     bool state = 1;
-    char  name;
+    char *name;
 
-    // Posicao do inode livre
     inode_pos = find_inode();
     
-    // Pula para o inode livre
     fseek(file, (map_size + inode_pos * sizeof(inode)), SEEK_SET);
     fread(&temp, sizeof(inode), 1, file);
+     
      // Retira o "mkdir " do comando
     name = strtok(recvBuffer," ");
+    name = strtok(NULL, " ");
     
- // Bit map, mapa de espaço livre
-    // Insere os dados no i
-    strcpy(temp.type, "Dir");  // Escreve state do arquivo
+    // Insere os dados no inode
+    strcpy(temp.name, name);
+    strcpy(temp.type, "Dir");
     temp.block = find_block();
 
-    // Cria um diorio temp
     dir temp_;
-    temp_.atual = inode_pos;
-    temp_.ant = dir_atual;
+    temp_.current = inode_pos;
+    temp_.prev = dir_current;
 
-    // Pula para o bloco livre encontrado e insere o diretorio no arquivo
-    fseek(file, (map_size + inode_tam + temp.block * BLOCK_SIZE), SEEK_SET);    
+    fseek(file, (map_size + inode_size + temp.block * BLOCK_SIZE), SEEK_SET);    
     fwrite(&temp_, sizeof(temp_), 1, file);   
     
     status = 0;
@@ -392,114 +429,30 @@ int mkdir_(char* recvBuffer){
     return status;
 }
 
-int touch(char* recvBuffer){
-
-    int bloco_livre, bloco_dir;
-    inode temp;
-    dir atual;
-    char  name;
-
-    // Procura o primeiro bloco livre
-    bloco_livre = find_block();
-
-    // Pula para o inode do diretorio atual e le o mesmo
-    fseek(file, (map_size + dir_atual * sizeof(inode)), SEEK_SET);
-    fread(&temp, sizeof(inode), 1, file);
-
-    // Posicao do bloco do diretorio atual
-    bloco_dir = temp.block;
-
-    // Pula para a posicao do bloco do diretorio atual e le o mesmo
-    fseek(file, (map_size + inode_tam + bloco_dir * BLOCK_SIZE), SEEK_SET);
-    fread(&atual, BLOCK_SIZE, 1, file);
-
-    name = strtok(recvBuffer," ");
-    name = strtok(NULL, " ");
-
-    // Procura uma posicao livre na lista de dados do diretorio atual
-    int i;
-    for(i = 0; i < MAX_ARQ; i++){
-        if(atual.arq[i].inode != 0)
-            break;
-    }
-
-    // Insere os dados do arquivo criado na lista de dados do diretorio atual
-    if(i != MAX_ARQ){
-        strcpy(atual.arq[i] name, name);
-        atual.arq[i].inode = bloco_livre;
-    }
-    else{
-        printf("Diretorio cheio\n");
-        exit(0);
-    }
-
-    // Pula para o bloco do diretorio atual e atualiza o mesmo
-    fseek(file, (map_size + inode_tam + bloco_dir * BLOCK_SIZE), SEEK_SET);
-    fwrite(&atual, sizeof(dir), 1, file);
-
-    return 0;
-    
-}
-
-char* ls(){
-    
-    inode temp;
-    int bloco;
-    dir atual;
-    char *lista = (char*) malloc(sizeof(char));
-
-    // Pula para o inode do diretorio atual e le o mesmo 
-    fseek(file, (map_size + dir_atual * sizeof(inode)), SEEK_SET);
-    fread(&temp, sizeof(inode), 1, file);
-
-    bloco = temp.block;
-
-    // Pula para o bloco do diretorio atual e le o mesmo
-    fseek(file, (map_size + inode_tam + bloco * BLOCK_SIZE), SEEK_SET);
-    fread(&atual, BLOCK_SIZE, 1, file);
-        
-    strcat(lista, "\t.\t..");
-
-    // Le a lista de dados que esta no bloco do diretorio atual
-    for(int i = 0; i < MAX_ARQ; i++){
-        if(atual.arq[i] name != NULL){
-            strcat(lista, "\t");
-            strcat(lista, atual.arq[i] name);
-        }
-        else break;
-    }
-
-    // Insere o caracter de finalizacao de string no final da lista
-    lista[strlen(lista) - 2] = '\n';
-    lista[strlen(lista) - 1] = '\0';
-
-    return lista;
-
-}
-
 int main(){
 
-    int socketR = create_socket();
+    int socket_read = create_socket();
 
     printf("Socket criado\n");
     
-    // Inicializando sistema de arquivo
     int initialize = fylesystem();
-
+    if (initialize != 0){
+        printf("Erro ao criar sistema de arquivo\n");    
+        exit(-1);
+    }
     printf("Sistema de Arquivo criado com sucesso\n");
 
     while(1){
-        // Aceita conexoes
         int *connfd = calloc(sizeof(int), 1);
 
         printf("\nEsperando conexao\n");        
-        *connfd = accept(socketR, (struct sockaddr*)NULL, NULL);
+        *connfd = accept(socket_read, (struct sockaddr*)NULL, NULL);
 
         if(*connfd == -1){
             printf("Erro ao aceitar a conexao\n");
             exit(-1);
         }
-        printf("Conexao criada\n");
+        printf("Conexao criada com sucesso\n");
 
         pthread_t tid;
         pthread_create(&tid, NULL, comando, connfd);
