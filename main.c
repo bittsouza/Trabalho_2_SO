@@ -49,65 +49,12 @@ Não é necessário criar um aplicativo cliente. Você pode usar o aplicativo ne
 #include <pthread.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <stdbool.h>
 
 
-	pthread_mutex_t mutex; // precisa ser global!
+pthread_mutex_t mutex; // precisa ser global!
+char* listDir();
 
-	char* listDir();
-
-    int create_socket();
-    void* comando(void* connfd);
-    int initialize_fs();
-    void root();
-    int find_block();
-    int find_inode();
-    int mkdir_(char* recvBuffer);
-    int rm_r(char* recvBuffer);
-    char* ls();
-    int touch(char* recvBuffer);
-    int rm(char* recvBuffer);
-    char* echo(char* recvBuffer);
-    char* cat(char* recvBuffer);
-
-
-struct inode_{
-        char name[5];   
-        char tipo[3];   
-        int bloco;      
-        bool estado;    
-    };
-    typedef struct inode_ inode;
-
-    // Dados
-    struct dado_{   
-        char name[5];
-        int inode;
-    };  
-    typedef struct dado_ dado;
-
-    // Diretorio
-    struct dir_{
-        int atual;
-        int ant;
-        dado arq[MAX_ARQ];
-    };
-    typedef struct dir_ dir;
-
-// Variáveis globais
-    // Mutex
-    pthread_mutex_t cadeado;
-    
-    // Tamanho das particoes
-    int mapa_tam = sizeof(bool) * NBLOCKS;
-    int inode_tam = sizeof(inode) * NBLOCKS;
-    int blocos_tam = BLOCK_SIZE * NBLOCKS;
-    int dir_atual;
-
-    FILE *file;
-
-/*void *ls(void *threadid, char msg){
+void *ls(void *threadid, char msg){
    	int *connfd = (int *)threadid;
    	char sendBuff[1025];
 
@@ -197,7 +144,6 @@ struct inode_{
 	}
 }
 
-*/
 
 char* listDir(){
 	char *retorno = calloc(2048,1);
@@ -219,125 +165,7 @@ char* listDir(){
     return retorno;
 }
 
-void* comando(void* connfd){
-    int* conexao = (int*)connfd;
-    char sendBuffer[1024], recvBuffer[1024];
-
-    memset(sendBuffer, 0, sizeof(sendBuffer));
-
-    strcpy(sendBuffer, "Conexao realizada com sucesso!\n");
-    send(*conexao, sendBuffer, strlen(sendBuffer), 0);
-
-    while (strcmp(recvBuffer, "exit") != 0){
-        //Retorna o tamanho da String que o cliente escreveu
-        memset(recvBuffer, 0, sizeof(recvBuffer));
-        int recvR = recv(*conexao, recvBuffer, 100, 0);
-
-        //Adiciona um \0 ao final da string para indicar seu termino
-        recvBuffer[recvR - 1] = '\0'; 
-        int status;
-
-        //criar (sub)diretorio
-        if (strncmp(recvBuffer, "mkdir ", 6) == 0){
-            pthread_mutex_lock(&mutex);
-
-            status = mkdir_(recvBuffer);
-
-            if(!status) printf("Pasta criada com sucesso\n");
-            else printf ("Erro ao criar pasta\n");
-        
-            pthread_mutex_unlock(&mutex);
-        }
-
-        //remover (sub)diretorio
-        if (strncmp(recvBuffer, "rm -r ", 6) == 0){
-            pthread_mutex_lock(&mutex);
-
-            //status = rm_r(recvBuffer);
-            
-            if(!status) printf("Pasta excluida com sucesso\n");
-            else printf ("Erro ao excluir pasta\n");
-
-            pthread_mutex_unlock(&mutex);
-        }
-
-        //entrar em (sub)diretorio
-        if (strncmp(recvBuffer, "cd ", 3) == 0){
-            
-            //--------------------------------------
-
-            pthread_mutex_lock(&mutex);
-            memmove(recvBuffer, recvBuffer + 3, strlen(recvBuffer));
-
-            chdir(recvBuffer);
-            printf("Entrando no diretorio %s\n", recvBuffer);
-            pthread_mutex_unlock(&mutex);
-            
-  
-        }
-
-        //mostrar conteudo do diretorio
-        if (strcmp(recvBuffer, "ls") == 0){
-
-            char *buffer = ls();
-
-            send(*conexao, buffer, strlen(buffer), 0);
-
-        }
-
-        //criar arquivo
-        if (strncmp(recvBuffer, "touch ", 6) == 0){
-            pthread_mutex_lock(&mutex);
-
-            status = touch(recvBuffer);
-
-            if(!status) printf("Arquivo criado com sucesso\n");
-            else printf ("Erro ao criar arquivo\n");
-
-            pthread_mutex_unlock(&mutex);
-        }
-
-        //remover arquivo
-        if ((strncmp(recvBuffer, "rm ", 3) == 0) && (strncmp(recvBuffer, "rm -r ", 6) != 0) ){
-            pthread_mutex_lock(&mutex);
-            
-            //status = rm(recvBuffer);
-
-            if(!status) printf("Arquivo removido com sucesso\n");
-            else printf("Erro ao remover arquivo\n");
-
-            pthread_mutex_unlock(&mutex);
-        }
-
-        //escrever um sequencia de caracteres em um arquivo
-        if (strncmp(recvBuffer, "echo ", 5) == 0){
-            pthread_mutex_lock(&mutex);
-
-            //status = echo(recvBuffer);
-
-            if(!status) printf("Caracteres inseridos com sucesso\n");
-            else printf("Erro ao inserir caracteres\n");
-
-            pthread_mutex_unlock(&mutex);
-        }
-
-        //mostrar conteudo do arquivo
-        if (strncmp(recvBuffer, "cat ", 4) == 0){
-            pthread_mutex_lock(&mutex);
-
-            //sendBuffer = cat(recvBuffer);
-            send(*conexao, sendBuffer, strlen(sendBuffer), 0);
-            
-            pthread_mutex_unlock(&mutex);
-        }
-
-    }
-    printf("Conexao fechada\n");
-}
-
-
 int main(int argc, char **argv){
-
 	int listenfd = 0;
 	struct sockaddr_in serv_addr;
 	char sendBuff[1025];
@@ -355,11 +183,7 @@ int main(int argc, char **argv){
 
 	listen(listenfd, 10);
 
-	int startfs = start_fs(); //inicia sistema de arquivos
-}
-
 	while(1){
-
 
 		int *connfd = calloc(sizeof(int),1);
 		pthread_t thread;
@@ -367,7 +191,7 @@ int main(int argc, char **argv){
 		*connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
 			
 		printf("Socket criado: %d\n", *connfd);
-		pthread_create(&thread, NULL, initialize_fs, connfd);		
+		pthread_create(&thread, NULL, ls, connfd);		
 	}
 	return 0;
 }
